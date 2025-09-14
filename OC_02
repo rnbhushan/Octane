@@ -1,0 +1,45 @@
+static final String OCTANE = "https://your-octane.example.com";
+  static final String CLIENT_ID = "your-client-id";
+  static final String CLIENT_SECRET = "your-client-secret";
+  static final String SPACE_ID = "1001";
+  static final String WORKSPACE_ID = "2002";
+
+  public static void main(String[] args) throws Exception {
+    CookieStore cookies = new BasicCookieStore();
+    RequestConfig cfg = RequestConfig.custom().setConnectTimeout(30000).setSocketTimeout(60000).build();
+
+    try (CloseableHttpClient http = HttpClients.custom()
+        .setDefaultCookieStore(cookies)
+        .setDefaultRequestConfig(cfg)
+        .build()) {
+
+      // 1) Sign in
+      HttpPost signIn = new HttpPost(OCTANE + "/authentication/sign_in");
+      signIn.setHeader("Content-Type", "application/json");
+      signIn.setHeader("Accept", "application/json");
+      String body = "{ \"client_id\": \""+CLIENT_ID+"\", \"client_secret\": \""+CLIENT_SECRET+"\" }";
+      signIn.setEntity(new StringEntity(body, StandardCharsets.UTF_8));
+      HttpResponse r = http.execute(signIn);
+      String resp = EntityUtils.toString(r.getEntity(), StandardCharsets.UTF_8);
+      System.out.println("sign_in status=" + r.getStatusLine().getStatusCode());
+      if (r.getStatusLine().getStatusCode() != 200) {
+        System.err.println(resp);
+        return;
+      }
+
+      // (Optional) show LWSSO cookie
+      for (Cookie c : cookies.getCookies()) {
+        if ("LWSSO_COOKIE_KEY".equals(c.getName())) {
+          System.out.println("LWSSO_COOKIE_KEY acquired");
+        }
+      }
+
+      // 2) Call any REST endpoint (cookie sent automatically)
+      HttpGet me = new HttpGet(OCTANE + "/api/shared_spaces/" + SPACE_ID + "/workspaces/" + WORKSPACE_ID + "/test_suites?limit=1");
+      me.setHeader("Accept", "application/json");
+      HttpResponse r2 = http.execute(me);
+      System.out.println("GET test_suites status=" + r2.getStatusLine().getStatusCode());
+      System.out.println(EntityUtils.toString(r2.getEntity(), StandardCharsets.UTF_8));
+    }
+  }
+}
