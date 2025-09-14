@@ -1,0 +1,49 @@
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.util.EntityUtils;
+
+public class CreateTestSuite {
+    public static void main(String[] args) {
+        String octaneUrl = "https://your-octane-server.com";  // Change to your Octane URL
+        String sharedSpaceId = "1001";                        // Replace with your space id
+        String workspaceId = "2002";                          // Replace with your workspace id
+        String clientId = "your-client-id";                   // From API access settings
+        String clientSecret = "your-client-secret";           // From API access settings
+        String suiteName = "My Regression Suite";             // Test Suite Name
+
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            // --- Step 1: Authenticate and get token (simplified using API key) ---
+            // Usually you first call /authentication/sign_in with clientId/secret
+            // Here assuming you already got a token from Octane login
+            String token = "your-octane-token"; // e.g. JWT or LWSSO_COOKIE_KEY
+
+            // --- Step 2: Prepare POST request for Test Suite creation ---
+            String url = octaneUrl + "/api/shared_spaces/" + sharedSpaceId
+                    + "/workspaces/" + workspaceId + "/test_suites";
+
+            HttpPost post = new HttpPost(url);
+            post.setHeader("Content-Type", "application/json");
+            post.setHeader("Accept", "application/json");
+            post.setHeader("Authorization", "Bearer " + token);
+
+            // JSON Payload
+            String jsonPayload = "{ \"name\": \"" + suiteName + "\", \"subtype\": \"test_suite\" }";
+            post.setEntity(new StringEntity(jsonPayload));
+
+            // --- Step 3: Execute request ---
+            HttpResponse response = client.execute(post);
+
+            int statusCode = response.getStatusLine().getStatusCode();
+            String responseString = EntityUtils.toString(response.getEntity(), "UTF-8");
+
+            System.out.println("Status Code: " + statusCode);
+            System.out.println("Response: " + responseString);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
