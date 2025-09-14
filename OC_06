@@ -1,0 +1,51 @@
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpPut;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.util.EntityUtils;
+import java.nio.charset.StandardCharsets;
+
+public class OctaneUpdateHelper {
+
+    private final CloseableHttpClient client;
+    private final String baseUrl;
+    private final String spaceId;
+    private final String workspaceId;
+
+    public OctaneUpdateHelper(CloseableHttpClient client, String baseUrl,
+                              String spaceId, String workspaceId) {
+        this.client = client;
+        this.baseUrl = baseUrl;
+        this.spaceId = spaceId;
+        this.workspaceId = workspaceId;
+    }
+
+    /**
+     * Updates the status of a Test Run (e.g., Passed, Failed, Blocked).
+     *
+     * @param testRunId The ID of the test run
+     * @param statusNodeId The status node id, e.g. "list_node.run_native_status_passed"
+     */
+    public void updateTestRunStatus(String testRunId, String statusNodeId) throws Exception {
+        String url = baseUrl + "/api/shared_spaces/" + spaceId +
+                "/workspaces/" + workspaceId + "/test_runs/" + testRunId;
+
+        HttpPut put = new HttpPut(url);
+        put.setHeader("Content-Type", "application/json");
+        put.setHeader("Accept", "application/json");
+
+        String payload = "{ \"data\": [ { " +
+                "\"id\": \"" + testRunId + "\"," +
+                "\"type\": \"test_run\"," +
+                "\"native_status\": { \"id\": \"" + statusNodeId + "\" }" +
+                "} ] }";
+
+        put.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
+
+        HttpResponse resp = client.execute(put);
+        String body = EntityUtils.toString(resp.getEntity(), StandardCharsets.UTF_8);
+
+        System.out.println("Update status=" + resp.getStatusLine().getStatusCode());
+        System.out.println("Response=" + body);
+    }
+}
