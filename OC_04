@@ -1,0 +1,27 @@
+public String createSuiteRun(CloseableHttpClient http, String baseUrl,
+                             String spaceId, String workspaceId,
+                             String suiteId, String suiteRunName, String releaseId) throws Exception {
+    String url = baseUrl + "/api/shared_spaces/" + spaceId + "/workspaces/" + workspaceId + "/suite_run";
+    // native_status: list_node.run_native_status.planned (example id must match your system’s list node)
+    String payload = "{ \"data\": [ {" +
+            "\"test\": {\"id\": " + suiteId + ", \"type\": \"test_suite\"}," +
+            "\"native_status\": {\"id\": 1095, \"type\": \"list_node\"}," +  // 1095 is example "planned"
+            "\"name\": \"" + suiteRunName + "\"," +
+            "\"release\": {\"id\": " + releaseId + ", \"type\": \"release\"}" +
+            "} ] }";
+
+    HttpPost post = new HttpPost(url);
+    post.setHeader("Accept", "application/json");
+    post.setHeader("Content-Type", "application/json");
+    post.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
+
+    HttpResponse resp = http.execute(post);
+    String body = EntityUtils.toString(resp.getEntity(), StandardCharsets.UTF_8);
+    int code = resp.getStatusLine().getStatusCode();
+    if (code != 200 && code != 201) {
+        throw new RuntimeException("Failed to create suite run: " + code + " -> " + body);
+    }
+    // parse the created suite run id (use a real JSON parser in prod)
+    String suiteRunId = body.split("\"id\"\\s*:\\s*\"")[1].split("\"")[0];
+    return suiteRunId;
+}
