@@ -1,0 +1,73 @@
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.util.EntityUtils;
+import java.nio.charset.StandardCharsets;
+
+public class OctaneHelper {
+
+    private final CloseableHttpClient client;
+    private final String baseUrl;
+    private final String spaceId;
+    private final String workspaceId;
+
+    public OctaneHelper(CloseableHttpClient client, String baseUrl, String spaceId, String workspaceId) {
+        this.client = client;
+        this.baseUrl = baseUrl;
+        this.spaceId = spaceId;
+        this.workspaceId = workspaceId;
+    }
+
+    /**
+     * Creates an Automated Test and links it to the given Test Suite.
+     */
+    public void createAutomatedTestInSuite(String atName, String tsName) throws Exception {
+        // 1) Lookup Test Suite ID by name
+        String tsUrl = baseUrl + "/api/shared_spaces/" + spaceId + "/workspaces/" + workspaceId
+                + "/test_suites?query=\"name EQ '" + tsName + "'\"";
+
+        HttpGet getTs = new HttpGet(tsUrl);
+        getTs.setHeader("Accept", "application/json");
+        HttpResponse tsResp = client.execute(getTs);
+        String tsBody = EntityUtils.toString(tsResp.getEntity(), StandardCharsets.UTF_8);
+        if (tsResp.getStatusLine().getStatusCode() != 200 || !tsBody.contains("\"id\"")) {
+            throw new RuntimeException("Test Suite not found: " + tsBody);
+        }
+        // Quick & dirty parse (in production use a JSON lib like Jackson)
+        String tsId = tsBody.split("\"id\"\\s*:\\s*\"")[1].split("\"")[0];
+
+        // 2) Create Automated Test
+        String atUrl = baseUrl + "/api/shared_spaces/" + spaceId + "/workspaces/" + workspaceId + "/tests";
+        HttpPost createAt = new HttpPost(atUrl);
+        createAt.setHeader("Content-Type", "application/json");
+        createAt.setHeader("Accept", "application/json");
+
+        String atPayload = "{ \"data\": [ { \"name\": \"" + atName + "\", \"subtype\": \"test_automated\" } ] }";
+        createAt.setEntity(new StringEntity(atPayload, StandardCharsets.UTF_8));
+
+        HttpResponse atResp = client.execute(createAt);
+        String atBody = EntityUtils.toString(atResp.getEntity(), StandardCharsets.UTF_8);
+        if (atResp.getStatusLine().getStatusCode() != 201 && atResp.getStatusLine().getStatusCode() != 200) {
+            throw new RuntimeException("Failed to create Automated Test: " + atBody);
+        }
+        String atId = atBody.split("\"id\"\\s*:\\s*\"")[1].split("\"")[0];
+
+        // 3) Link Automated Test to Test Suite
+        String linkUrl = baseUrl + "/api/shared_spaces/" + spaceId + "/workspaces/" + workspaceId + "/test_suite_link_to_test";
+        HttpPost link = new HttpPost(linkUrl);
+        link.setHeader("Content-Type", "application/json");
+        link.setHeader("Accept", "application/json");
+
+        String linkPayload = "{ \"data\": [ { " +
+                "\"test\": { \"id\": \"" + atId + "\" }, " +
+                "\"test_suite\": { \"id\": \"" + tsId + "\" } } ] }";
+        link.setEntity(new StringEntity(linkPayload, StandardCharsets.UTF_8));
+
+        HttpResponse linkResp = client.execute(link);
+        String linkBody = EntityUtils.toString(linkResp.getEntity(), StandardCharsets.UTF_8);
+        System.out.println("Link status=" + linkResp.getStatusLine().getStatusCode());
+        System.out.println("Link response=" + linkBody);
+    }
+}
