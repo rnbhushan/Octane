@@ -1,0 +1,61 @@
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.util.EntityUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.nio.charset.StandardCharsets;
+
+public class OctaneRunHelper {
+
+    private final CloseableHttpClient client;
+    private final String baseUrl;
+    private final String spaceId;
+    private final String workspaceId;
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    public OctaneRunHelper(CloseableHttpClient client, String baseUrl,
+                           String spaceId, String workspaceId) {
+        this.client = client;
+        this.baseUrl = baseUrl;
+        this.spaceId = spaceId;
+        this.workspaceId = workspaceId;
+    }
+
+    /**
+     * Creates a Test Run for the given Automated Test inside a Suite Run,
+     * and returns the new Test Run ID.
+     */
+    public String addAutomatedTestToSuiteRun(String atId, String suiteRunId, String runName) throws Exception {
+        String url = baseUrl + "/api/shared_spaces/" + spaceId +
+                "/workspaces/" + workspaceId + "/test_runs";
+
+        HttpPost post = new HttpPost(url);
+        post.setHeader("Content-Type", "application/json");
+        post.setHeader("Accept", "application/json");
+
+        String payload = "{ \"data\": [ { " +
+                "\"name\": \"" + runName + "\"," +
+                "\"test\": { \"id\": \"" + atId + "\" }," +
+                "\"suite_run\": { \"id\": \"" + suiteRunId + "\" }," +
+                "\"subtype\": \"test_run_automated\"" +
+                "} ] }";
+
+        post.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
+
+        HttpResponse resp = client.execute(post);
+        String body = EntityUtils.toString(resp.getEntity(), StandardCharsets.UTF_8);
+
+        if (resp.getStatusLine().getStatusCode() != 200 &&
+            resp.getStatusLine().getStatusCode() != 201) {
+            throw new RuntimeException("Failed to create Test Run: " + body);
+        }
+
+        // Parse the JSON and return the new Test Run ID
+        JsonNode root = mapper.readTree(body);
+        String runId = root.path("data").get(0).path("id").asText();
+        return runId;
+    }
+}
