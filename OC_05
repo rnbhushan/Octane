@@ -1,0 +1,49 @@
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.util.EntityUtils;
+
+import java.nio.charset.StandardCharsets;
+
+public class OctaneRunHelper {
+
+    private final CloseableHttpClient client;
+    private final String baseUrl;
+    private final String spaceId;
+    private final String workspaceId;
+
+    public OctaneRunHelper(CloseableHttpClient client, String baseUrl,
+                           String spaceId, String workspaceId) {
+        this.client = client;
+        this.baseUrl = baseUrl;
+        this.spaceId = spaceId;
+        this.workspaceId = workspaceId;
+    }
+
+    /**
+     * Maps an Automated Test to an existing Suite Run by creating a Test Run.
+     */
+    public void addAutomatedTestToSuiteRun(String atId, String suiteRunId, String runName) throws Exception {
+        String url = baseUrl + "/api/shared_spaces/" + spaceId + "/workspaces/" + workspaceId + "/test_runs";
+
+        HttpPost post = new HttpPost(url);
+        post.setHeader("Content-Type", "application/json");
+        post.setHeader("Accept", "application/json");
+
+        String payload = "{ \"data\": [ { " +
+                "\"name\": \"" + runName + "\"," +
+                "\"test\": { \"id\": \"" + atId + "\" }," +
+                "\"suite_run\": { \"id\": \"" + suiteRunId + "\" }," +
+                "\"subtype\": \"test_run_automated\"" +
+                "} ] }";
+
+        post.setEntity(new StringEntity(payload, StandardCharsets.UTF_8));
+
+        HttpResponse resp = client.execute(post);
+        String body = EntityUtils.toString(resp.getEntity(), StandardCharsets.UTF_8);
+
+        System.out.println("Status: " + resp.getStatusLine().getStatusCode());
+        System.out.println("Response: " + body);
+    }
+}
