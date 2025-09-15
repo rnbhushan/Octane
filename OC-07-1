@@ -1,0 +1,68 @@
+import org.apache.http.HttpResponse;
+import org.apache.http.client.CookieStore;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.BasicCookieStore;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.util.EntityUtils;
+
+import java.nio.charset.StandardCharsets;
+
+public class CreateSuiteWithSignIn {
+  // ---- fill these ----
+  static final String OCTANE_BASE = "https://your-octane.example.com"; // no trailing slash
+  static final String SPACE_ID    = "1001";
+  static final String WORKSPACE_ID= "2002";
+  static final String CLIENT_ID   = "your-client-id";     // Settings → Spaces → API Access
+  static final String CLIENT_SECRET = "your-client-secret";
+  static final String SUITE_NAME  = "My Regression Suite";
+
+  public static void main(String[] args) throws Exception {
+    CookieStore cookieStore = new BasicCookieStore();
+    RequestConfig cfg = RequestConfig.custom()
+        .setConnectTimeout(30_000).setSocketTimeout(60_000).build();
+
+    try (CloseableHttpClient client = HttpClients.custom()
+        .setDefaultCookieStore(cookieStore)
+        .setDefaultRequestConfig(cfg)
+        .build()) {
+
+      // 1) Sign in: obtain LWSSO_COOKIE_KEY
+      HttpPost signIn = new HttpPost(OCTANE_BASE + "/authentication/sign_in");
+      signIn.setHeader("Accept", "application/json");
+      signIn.setHeader("Content-Type", "application/json");
+      String signinJson = "{ \"client_id\": \"" + CLIENT_ID + "\", \"client_secret\": \"" + CLIENT_SECRET + "\" }";
+      signIn.setEntity(new StringEntity(signinJson, StandardCharsets.UTF_8));
+      HttpResponse signInResp = client.execute(signIn);
+      String signInBody = EntityUtils.toString(signInResp.getEntity(), StandardCharsets.UTF_8);
+      int signInCode = signInResp.getStatusLine().getStatusCode();
+      System.out.println("sign_in status=" + signInCode);
+      if (signInCode != 200) {
+        System.err.println("sign_in failed:\n" + signInBody);
+        return;
+      }
+
+      // 2) Create Test Suite (payload MUST be {"data":[{...}]})
+      String url = OCTANE_BASE + "/api/shared_spaces/" + SPACE_ID + "/workspaces/" + WORKSPACE_ID + "/test_suites";
+      HttpPost post = new HttpPost(url);
+      post.setHeader("Accept", "application/json");
+      post.setHeader("Content-Type", "application/json");
+
+      String jsonPayload =
+          "{ \"data\": [ { \"name\": \"" + escape(SUITE_NAME) + "\", \"subtype\": \"test_suite\" } ] }";
+      post.setEntity(new StringEntity(jsonPayload, StandardCharsets.UTF_8));
+
+      HttpResponse response = client.execute(post);
+      int status = response.getStatusLine().getStatusCode();
+      String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+      System.out.println("create suite status=" + status);
+      System.out.println(body);
+    }
+  }
+
+  private static String escape(String s) {
+    return s.replace("\\", "\\\\").replace("\"", "\\\"");
+  }
+}
