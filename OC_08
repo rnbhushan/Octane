@@ -1,0 +1,182 @@
+import okhttp3.*;
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import org.w3c.dom.*;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.*;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+import java.io.StringWriter;
+
+/**
+ * Posts a single Automated Run (status = Passed) into a Suite Run.
+ * If the Suite Run doesn't exist, Octane creates it (requires a release; we use the default release).
+ *
+ * Required inputs:
+ *  - suiteId           : long              // Test Suite ID in Octane
+ *  - suiteRunName      : String            // SR name to create/use (external_run_id)
+ *  - appModuleName     : String            // Application Module (Product Area) by NAME
+ *  - suiteNameForTest  : String            // Used to build the automated test identity (name/class/etc.)
+ *
+ * Notes:
+ *  - Uses release name "_default_" (unique in workspace). Change if you want a specific release.
+ *  - Automated test identity in Octane is (Component/Package/Class/Name). We derive simple values here.
+ *  - Returns the HTTP status code from the /test-results POST (202 means accepted).
+ */
+public class OctaneTestResultsClient {
+
+    private final OkHttpClient http = new OkHttpClient();
+    private final String host;        // e.g. "https://your-octane.example.com"
+    private final String spaceId;     // shared space id
+    private final String workspaceId; // workspace id
+    private final String bearerToken; // "Bearer <token>"
+
+    public OctaneTestResultsClient(String host, String spaceId, String workspaceId, String bearerToken) {
+        this.host = host.endsWith("/") ? host.substring(0, host.length() - 1) : host;
+        this.spaceId = spaceId;
+        this.workspaceId = workspaceId;
+        this.bearerToken = bearerToken.startsWith("Bearer ") ? bearerToken : "Bearer " + bearerToken;
+    }
+
+    /** Main API */
+    public int postPassedARIntoSuiteRun(long suiteId,
+                                        String suiteRunName,
+                                        String appModuleName,
+                                        String suiteNameForTest) throws Exception {
+
+        // 1) Resolve Application Module (product_area) ID by NAME
+        String productAreaId = lookupProductAreaIdByName(appModuleName);
+        if (productAreaId == null) {
+            throw new IllegalStateException("Application Module not found by name: " + appModuleName);
+        }
+
+        // 2) Build the XML payload for /test-results:
+        //    - <suite_ref id="... " external_run_id="SR name"/>
+        //    - <release name="_default_"/>
+        //    - <product_areas><product_area_ref id="..."/></product_areas>
+        //    - <test_runs><test_run ... status="Passed"/></test_runs>
+        String xml = buildPassedPayloadXml(suiteId, suiteRunName, productAreaId, suiteNameForTest);
+
+        // 3) POST to /test-results (Content-Type: application/xml). Expect 202 Accepted when queued.
+        String url = host + "/api/shared_spaces/" + spaceId + "/workspaces/" + workspaceId + "/test-results";
+        Request request = new Request.Builder()
+                .url(url)
+                .post(RequestBody.create(xml, MediaType.parse("application/xml")))
+                .header("Authorization", bearerToken)
+                .header("Content-Type", "application/xml")
+                .build();
+
+        try (Response resp = http.newCall(request).execute()) {
+            // 202 = accepted; body contains a JSON task like {"status":"queued","id":1103}
+            return resp.code();
+        }
+    }
+
+    /** Finds product_area (Application Module) by exact NAME, returns its id or null. */
+    private String lookupProductAreaIdByName(String name) throws IOException {
+        // GET /product_areas?query="name EQ 'X'"&fields=id,name
+        String q = "\"name EQ '" + escapeQuotes(name) + "'\"";
+        String url = host + "/api/shared_spaces/" + spaceId + "/workspaces/" + workspaceId
+                + "/product_areas?query=" + urlEncode(q) + "&fields=id,name&limit=1";
+
+        Request request = new Request.Builder()
+                .url(url)
+                .get()
+                .header("Authorization", bearerToken)
+                .header("Content-Type", "application/json")
+                .build();
+
+        try (Response resp = http.newCall(request).execute()) {
+            if (!resp.isSuccessful()) return null;
+            String body = resp.body() != null ? resp.body().string() : "";
+            // super-lightweight parse to get "id":"1234"
+            int idIdx = body.indexOf("\"id\":");
+            if (idIdx < 0) return null;
+            int q1 = body.indexOf('"', idIdx + 5);
+            int q2 = body.indexOf('"', q1 + 1);
+            return (q1 > 0 && q2 > q1) ? body.substring(q1 + 1, q2) : null;
+        }
+    }
+
+    /** Builds a minimal, valid test-results XML that injects a single Passed test into a Suite Run. */
+    private String buildPassedPayloadXml(long suiteId,
+                                         String suiteRunName,
+                                         String productAreaId,
+                                         String suiteNameForTest) throws Exception {
+
+        // Test identity fields (you can customize to match your automation):
+        String module = "/suite";
+        String pkg    = "suite";
+        String clazz  = "SuiteRunner";
+        String name   = suiteNameForTest; // appears as the Automated Test name
+
+        Document doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
+        Element root = doc.createElement("test_result");
+        doc.appendChild(root);
+
+        // Global links: suite_ref, release (default), product_areas
+        Element suiteRef = doc.createElement("suite_ref");
+        suiteRef.setAttribute("id", String.valueOf(suiteId));
+        suiteRef.setAttribute("external_run_id", suiteRunName); // <- this becomes the Suite Run name
+        root.appendChild(suiteRef);
+
+        Element release = doc.createElement("release");
+        release.setAttribute("name", "_default_"); // use the default release (unique by name)
+        root.appendChild(release);
+
+        Element productAreas = doc.createElement("product_areas");
+        Element areaRef = doc.createElement("product_area_ref");
+        areaRef.setAttribute("id", productAreaId);
+        productAreas.appendChild(areaRef);
+        root.appendChild(productAreas);
+
+        // Test runs
+        Element testRuns = doc.createElement("test_runs");
+        Element testRun = doc.createElement("test_run");
+        testRun.setAttribute("module", module);
+        testRun.setAttribute("package", pkg);
+        testRun.setAttribute("class", clazz);
+        testRun.setAttribute("name", name);
+        testRun.setAttribute("duration", "1");         // ms, required
+        testRun.setAttribute("status", "Passed");      // Passed | Failed | Skipped
+        // (optional) started ms since epoch:
+        // testRun.setAttribute("started", String.valueOf(System.currentTimeMillis()));
+        testRuns.appendChild(testRun);
+        root.appendChild(testRuns);
+
+        // Serialize XML
+        Transformer tf = TransformerFactory.newInstance().newTransformer();
+        tf.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+        tf.setOutputProperty(OutputKeys.INDENT, "yes");
+        StringWriter sw = new StringWriter();
+        tf.transform(new DOMSource(doc), new StreamResult(sw));
+        return sw.toString();
+    }
+
+    private static String urlEncode(String s) {
+        return URLEncoder.encode(s, StandardCharsets.UTF_8);
+    }
+    private static String escapeQuotes(String s) {
+        return s.replace("'", "\\'");
+    }
+}
+
+
+
+OctaneTestResultsClient client = new OctaneTestResultsClient(
+    "https://<HOST>", "<SPACE_ID>", "<WORKSPACE_ID>", "Bearer <ACCESS_TOKEN>"
+);
+
+int status = client.postPassedARIntoSuiteRun(
+    /* suiteId */        3001L,
+    /* suiteRunName */   "Nightly SR - 2025-09-17",
+    /* appModuleName */  "Payments-Service",
+    /* suiteNameForTest */ "Payments End-to-End"
+);
+
+if (status == 202) {
+    System.out.println("Queued OK (202): test-results task accepted.");
+} else {
+    System.out.println("Unexpected status: " + status);
+}
