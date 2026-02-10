@@ -1,0 +1,102 @@
+You can do this in UFT Developer by creating two separate Terminal Emulator test objects, each one configured to attach to a different WinHLLAPI session (A and B). Then you connect to both in the same Java run, do actions on each, and switch between them by calling methods on the correct object.
+Below is a working skeleton (adjust the property names according to your TE add-in / WinHLLAPI provider, because they differ slightly between Rumba / Extra! / PCOMM / HostExplorer, etc.).
+1) Key idea
+Session A = one TE environment object (attach to A)
+Session B = another TE environment object (attach to B)
+Perform steps like:
+connect/attach to A → login/do navigation
+connect/attach to B → do another flow
+read screen text from A and compare with B, etc.
+2) Java code example (UFT Developer SDK)
+Copy code
+Java
+import com.hp.lft.sdk.*;
+import com.hp.lft.sdk.terminal.*;   // Terminal Emulator SDK (TE)
+import com.hp.lft.report.*;         // optional reporting
+
+public class DualHllapiSessions {
+
+    public static void main(String[] args) throws Exception {
+
+        ModifiableSDKConfiguration config = new ModifiableSDKConfiguration();
+        SDK.init(config);
+
+        try {
+            // -------- Session A ----------
+            TerminalEmulatorEnvironment envA = TerminalEmulatorEnvironment.describe(
+                    new TerminalEmulatorEnvironmentDescription.Builder()
+                            // Provider-specific:
+                            // Some environments use "sessionId" or "sessionName" or "shortName"
+                            // Replace with the correct one for your emulator.
+                            .session("A")
+                            .build()
+            );
+
+            TerminalWindow winA = envA.getTerminalWindow();
+
+            // -------- Session B ----------
+            TerminalEmulatorEnvironment envB = TerminalEmulatorEnvironment.describe(
+                    new TerminalEmulatorEnvironmentDescription.Builder()
+                            .session("B")
+                            .build()
+            );
+
+            TerminalWindow winB = envB.getTerminalWindow();
+
+            // ---- Attach/activate each session window ----
+            winA.activate();
+            // Example actions on A
+            winA.sendKeys("LOGON\r");    // \r = Enter (commonly)
+            // wait if needed
+            Thread.sleep(1000);
+
+            winB.activate();
+            // Example actions on B
+            winB.sendKeys("LOGON\r");
+            Thread.sleep(1000);
+
+            // ---- Read text from both sessions (example) ----
+            winA.activate();
+            String screenA = winA.getText();   // full screen text (method may vary slightly)
+            System.out.println("Session A Screen:\n" + screenA);
+
+            winB.activate();
+            String screenB = winB.getText();
+            System.out.println("Session B Screen:\n" + screenB);
+
+        } finally {
+            SDK.cleanup();
+        }
+    }
+}
+What you must adjust
+How to identify the session
+In some TE environments it’s .session("A")
+In others it could be .sessionId("A"), .shortName("A"), .name("A"), etc.
+How to read screen / send keys
+Sometimes it’s sendKeys(), sometimes typeKeys()
+For text extraction it can be getText(), getVisibleText(), or “screen API” methods.
+3) Recommended robust approach (when .session("A") doesn’t work)
+Use a properties-based description and match by:
+emulator type (e.g., 3270)
+session short name (A/B)
+process / window title pattern
+Example pattern (property style):
+Copy code
+Java
+TerminalEmulatorEnvironment envA = TerminalEmulatorEnvironment.describe(
+    new TerminalEmulatorEnvironmentDescription.Builder()
+        .emulatorType(EmulatorType.TE_3270)
+        .session("A")
+        .build()
+);
+If the emulator supports window title, you can also describe the terminal window using title contains “A” / “B”.
+4) Common gotchas (WinHLLAPI + dual sessions)
+✅ Both sessions must be already started in the emulator (A and B opened).
+✅ If the emulator enforces single active session, you must activate() before each action.
+✅ Some emulators require separate “presentation space” handles per session; UFTD hides this, but your description must correctly bind to A and B.
+5) Quick verification tip (to know what properties to use)
+In UFT Developer, use Object Identification Center (OIC) and spy the Terminal session A and B.
+Check what property differs: session, shortName, title, psId, etc.
+Use that property in your .describe().
+If you tell me which emulator you’re using (IBM PCOMM / Micro Focus Rumba / Attachmate Extra! / HostExplorer / etc.) and what you see in OIC properties for Session A vs Session B, I’ll convert the above into the exact working describe() code for your setup.
